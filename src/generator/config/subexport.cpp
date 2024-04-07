@@ -4,22 +4,22 @@
 #include <cmath>
 #include <climits>
 
-#include "../../config/regmatch.h"
-#include "../../generator/config/subexport.h"
-#include "../../generator/template/templates.h"
-#include "../../handler/settings.h"
-#include "../../parser/config/proxy.h"
-#include "../../script/script_quickjs.h"
-#include "../../utils/bitwise.h"
-#include "../../utils/file_extra.h"
-#include "../../utils/ini_reader/ini_reader.h"
-#include "../../utils/logger.h"
-#include "../../utils/network.h"
-#include "../../utils/rapidjson_extra.h"
-#include "../../utils/regexp.h"
-#include "../../utils/stl_extra.h"
-#include "../../utils/urlencode.h"
-#include "../../utils/yamlcpp_extra.h"
+#include "config/regmatch.h"
+#include "generator/config/subexport.h"
+#include "generator/template/templates.h"
+#include "handler/settings.h"
+#include "parser/config/proxy.h"
+#include "script/script_quickjs.h"
+#include "utils/bitwise.h"
+#include "utils/file_extra.h"
+#include "utils/ini_reader/ini_reader.h"
+#include "utils/logger.h"
+#include "utils/network.h"
+#include "utils/rapidjson_extra.h"
+#include "utils/regexp.h"
+#include "utils/stl_extra.h"
+#include "utils/urlencode.h"
+#include "utils/yamlcpp_extra.h"
 #include "nodemanip.h"
 #include "ruleconvert.h"
 
@@ -230,18 +230,30 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
     std::vector<Proxy> nodelist;
     string_array remarks_list;
     /// proxies style
-    bool block = false, compact = false;
+    bool proxy_block = false, proxy_compact = false, group_block = false, group_compact = false;
     switch(hash_(ext.clash_proxies_style))
     {
     case "block"_hash:
-        block = true;
+        proxy_block = true;
         break;
     default:
     case "flow"_hash:
         break;
     case "compact"_hash:
-        compact = true;
+        proxy_compact = true;
         break;
+    }
+    switch(hash_(ext.clash_proxy_groups_style))
+    {
+        case "block"_hash:
+            group_block = true;
+            break;
+        default:
+        case "flow"_hash:
+            break;
+        case "compact"_hash:
+            group_compact = true;
+            break;
     }
 
     for(Proxy &x : nodes)
@@ -474,7 +486,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         // sees in https://dreamacro.github.io/clash/configuration/outbound.html#snell
         if(udp && x.Type != ProxyType::Snell)
             singleproxy["udp"] = true;
-        if(block)
+        if(proxy_block)
             singleproxy.SetStyle(YAML::EmitterStyle::Block);
         else
             singleproxy.SetStyle(YAML::EmitterStyle::Flow);
@@ -483,7 +495,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         nodelist.emplace_back(x);
     }
 
-    if(compact)
+    if(proxy_compact)
         proxies.SetStyle(YAML::EmitterStyle::Flow);
 
     if(ext.nodelist)
@@ -545,7 +557,10 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         }
         if(!filtered_nodelist.empty())
             singlegroup["proxies"] = filtered_nodelist;
-        //singlegroup.SetStyle(YAML::EmitterStyle::Flow);
+        if(group_block)
+            singlegroup.SetStyle(YAML::EmitterStyle::Block);
+        else
+            singlegroup.SetStyle(YAML::EmitterStyle::Flow);
 
         bool replace_flag = false;
         for(auto && original_group : original_groups)
@@ -560,6 +575,9 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         if(!replace_flag)
             original_groups.push_back(singlegroup);
     }
+
+    if(group_compact)
+        original_groups.SetStyle(YAML::EmitterStyle::Flow);
 
     if(ext.clash_new_field_name)
         yamlnode["proxy-groups"] = original_groups;
@@ -1318,7 +1336,6 @@ std::string proxyToQuanX(std::vector<Proxy> &nodes, const std::string &base_conf
 
 void proxyToQuanX(std::vector<Proxy> &nodes, INIReader &ini, std::vector<RulesetContent> &ruleset_content_array, const ProxyGroupConfigs &extra_proxy_group, extra_settings &ext)
 {
-    std::string type;
     std::string proxyStr;
     tribool udp, tfo, scv, tls13;
     std::vector<Proxy> nodelist;
@@ -1329,7 +1346,10 @@ void proxyToQuanX(std::vector<Proxy> &nodes, INIReader &ini, std::vector<Ruleset
     for(Proxy &x : nodes)
     {
         if(ext.append_proxy_type)
+        {
+            std::string type = getProxyTypeName(x.Type);
             x.Remark = "[" + type + "] " + x.Remark;
+        }
 
         processRemark(x.Remark, remarks_list);
 
@@ -1479,6 +1499,7 @@ void proxyToQuanX(std::vector<Proxy> &nodes, INIReader &ini, std::vector<Ruleset
 
     for(const ProxyGroupConfig &x : extra_proxy_group)
     {
+        std::string type;
         string_array filtered_nodelist;
 
         switch(x.Type)
@@ -1538,7 +1559,7 @@ void proxyToQuanX(std::vector<Proxy> &nodes, INIReader &ini, std::vector<Ruleset
         std::string proxies = join(filtered_nodelist, ", ");
 
         std::string singlegroup = type + "=" + x.Name + ", " + proxies;
-        if(type != "static")
+        if(x.Type != ProxyGroupType::Select && x.Type != ProxyGroupType::SSID)
         {
             singlegroup += ", check-interval=" + std::to_string(x.Interval);
             if(x.Tolerance > 0)
